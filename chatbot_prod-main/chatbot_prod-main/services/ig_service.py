@@ -818,6 +818,30 @@ async def process_comments_events(value, ig_account_id):
         logger.error("Missing media_id or user_id.")
         return
 
+    # ADD THIS: Get org_id and trigger automation
+    from services.automation_trigger_handler import check_and_trigger_automations
+    
+    org_data = db.organizations.find_one({"ig_id": ig_account_id})
+    if org_data:
+        org_id = org_data.get("org_id")
+        
+        # Trigger automation check BEFORE existing keyword logic
+        await check_and_trigger_automations(
+            org_id=org_id,
+            platform="instagram",
+            event_type="post_comment",
+            trigger_data={
+                "platform": "instagram",
+                "platform_id": ig_account_id,
+                "comment_id": comment_id,
+                "comment_text": text,
+                "commenter_username": from_user,
+                "commenter_id": user_id,
+                "post_id": media_id,
+                "message_text": text  # For keyword matching
+            }
+        )
+
     media_info = media_data.get(str(media_id))
 
     if media_info and media_info['keyword'].lower() in text:
