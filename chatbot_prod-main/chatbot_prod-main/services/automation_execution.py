@@ -262,39 +262,37 @@ async def _execute_node(
     )
     
     try:
-        # Execute based on node type
-        if node_type == "delay":
-            await _execute_delay_node(context, node_id, node_config)
+        # Handle TRIGGER nodes - just log and continue
+        if node_type in ["instagram_dm_received", "instagram_post_comment", 
+                        "instagram_story_reply", "instagram_story_mention",
+                        "whatsapp_message_received", "contact_tag_added", 
+                        "contact_tag_removed"]:
+            context.log(
+                node_id=node_id,
+                node_type=node_type,
+                action="trigger",
+                message=f"Trigger node: {node_type}",
+                success=True
+            )
         
+        # Handle CONDITION nodes (have multiple outputs)
         elif node_type == "condition":
-            # Condition nodes have multiple outputs (true/false)
             result = await _execute_condition_node(context, node_id, node_config)
-            # Find connections based on condition result
             next_nodes = _get_conditional_next_nodes(node_id, connections, result)
             for next_node_id in next_nodes:
                 await _execute_node(context, next_node_id, nodes, connections)
             return True
         
+        # Handle RANDOMIZER nodes
         elif node_type == "randomizer":
-            # Randomizer randomly selects one output path
             next_node_id = await _execute_randomizer_node(context, node_id, connections)
             if next_node_id:
                 await _execute_node(context, next_node_id, nodes, connections)
             return True
         
-        elif node_type in ["instagram_message", "whatsapp_message", "add_tag", "remove_tag", "set_custom_field", "http_request"]:
-            # Action nodes
-            await execute_action_node(context, node_id, node_type, node_config)
-        
+        # Handle all ACTION nodes (delegate to automation_actions.py)
         else:
-            # Trigger nodes or unknown nodes - just log
-            context.log(
-                node_id=node_id,
-                node_type=node_type,
-                action="node_executed",
-                message=f"Node {node_type} executed",
-                success=True
-            )
+            await execute_action_node(context, node_id, node_type, node_config)
         
         # Find and execute next connected nodes
         next_nodes = _get_next_nodes(node_id, connections)
