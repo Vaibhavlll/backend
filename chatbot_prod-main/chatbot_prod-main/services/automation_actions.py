@@ -46,15 +46,133 @@ async def execute_action_node(context, node_id: str, node_type: str, config: Dic
             
         elif node_type == "http_request":
             await execute_http_request(context, node_id, config, trigger_data)
+        
+        # NEW ACTION TYPES FOR INSTAGRAM COMMENTS
+        elif node_type == "reply_to_comment":
+            await execute_reply_to_comment(context, node_id, config, trigger_data)
+            
+        elif node_type == "send_dm":
+            await execute_send_dm(context, node_id, config, trigger_data)
+        
+        elif node_type == "delay":
+            await _execute_delay_node(context, node_id, config)
             
         else:
-            context.log(node_id, f"Unknown action type: {node_type}", level="warning")
+            context.log(node_id, node_type, "unknown", f"Unknown action type: {node_type}", success=False)
             
     except Exception as e:
-        context.log(node_id, f"Error executing action: {str(e)}", level="error")
+        context.log(node_id, node_type, "error", f"Error executing action: {str(e)}", success=False)
         logger.error(f"Error executing action node {node_id}: {str(e)}", exc_info=True)
 
 
+# ADD THESE NEW FUNCTIONS AT THE END OF THE FILE (after line 230)
+
+async def execute_reply_to_comment(context, node_id: str, config: Dict, trigger_data: Dict):
+    """Reply to an Instagram comment"""
+    from services.ig_service import reply_to_comment
+    
+    comment_id = trigger_data.get("comment_id")
+    ig_account_id = trigger_data.get("platform_id")
+    
+    if not comment_id or not ig_account_id:
+        context.log(node_id, "reply_to_comment", "error", 
+                   "Missing comment_id or ig_account_id", success=False)
+        return
+    
+    reply_text = config.get("text", "")
+    reply_text = replace_variables(reply_text, context.variables)
+    
+    context.log(node_id, "reply_to_comment", "executing", 
+               f"Replying to comment {comment_id}")
+    
+    try:
+        await reply_to_comment(comment_id, reply_text, ig_account_id)
+        context.log(node_id, "reply_to_comment", "success", 
+                   "Comment reply sent successfully", success=True)
+        context.set_variable("reply_sent", True)
+    except Exception as e:
+        context.log(node_id, "reply_to_comment", "error", 
+                   f"Failed to reply: {str(e)}", success=False)
+
+
+async def execute_send_dm(context, node_id: str, config: Dict, trigger_data: Dict):
+    """Send a DM to the user who triggered the automation"""
+    from services.ig_service import send_private_reply
+    
+    comment_id = trigger_data.get("comment_id")
+    ig_account_id = trigger_data.get("platform_id")
+    
+    if not comment_id or not ig_account_id:
+        context.log(node_id, "send_dm", "error", 
+                   "Missing comment_id or ig_account_id", success=False)
+        return
+    
+    message_text = config.get("text", "")
+    message_text = replace_variables(message_text, context.variables)
+    
+    link_url = config.get("link_url")
+    button_title = config.get("button_title", "View Link")
+    
+    # Validate link_url if provided
+    has_valid_link = (
+        link_url and 
+        isinstance(link_url, str) and 
+        link_url.strip() and 
+        (link_url.startswith('http://') or link_url.startswith('https://'))
+    )
+    
+    context.log(node_id, "send_dm", "executing", 
+               f"Sending DM via comment {comment_id}")
+    
+    try:
+        result = await send_private_reply(
+            comment_id=comment_id,
+            ig_account_id=ig_account_id,
+            message_text=message_text,
+            link_url=link_url if has_valid_link else None,
+            button_title=button_title if has_valid_link else None
+        )
+        
+        if result:
+            context.log(node_id, "send_dm", "success", 
+                       "DM sent successfully", success=True)
+            context.set_variable("dm_sent", True)
+        else:
+            context.log(node_id, "send_dm", "error", 
+                       "Failed to send DM", success=False)
+    except Exception as e:
+        context.log(node_id, "send_dm", "error", 
+                   f"Failed to send DM: {str(e)}", success=False)
+
+
+async def _execute_delay_node(context, node_id: str, config: Dict):
+    """Execute a delay node"""
+    import asyncio
+    
+    amount = config.get("amount", 1)
+    unit = config.get("unit", "seconds")
+    
+    # Convert to seconds
+    if unit == "minutes":
+        delay_seconds = amount * 60
+    elif unit == "hours":
+        delay_seconds = amount * 3600
+    elif unit == "days":
+        delay_seconds = amount * 86400
+    else:
+        delay_seconds = amount
+    
+    # Cap delay at 5 minutes for safety in production
+    delay_seconds = min(delay_seconds, 300)
+    
+    context.log(node_id, "delay", "executing", 
+               f"Delaying for {delay_seconds} seconds", success=True)
+    
+    await asyncio.sleep(delay_seconds)
+    
+    context.log(node_id, "delay", "success", "Delay completed", success=True)
+
+    
 async def execute_instagram_message(context, node_id: str, config: Dict, trigger_data: Dict):
     """Send an Instagram message"""
     message_type = config.get("messageType", "text")
