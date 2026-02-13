@@ -248,6 +248,73 @@ async def publish_automation_flow(org_id: str, flow_id: str) -> Optional[Dict]:
         raise
 
 
+async def unpublish_automation_flow(org_id: str, flow_id: str) -> Optional[Dict]:
+    """Unpublish (deactivate) an automation flow"""
+    try:
+        collection = _automation_flows_collection(org_id)
+        
+        flow = collection.find_one({"flow_id": flow_id, "org_id": org_id})
+        if not flow:
+            return None
+        
+        # Deactivate triggers
+        await _deactivate_flow_triggers(org_id, flow_id)
+        
+        # Update flow status
+        now = datetime.now(timezone.utc)
+        updated_flow = collection.find_one_and_update(
+            {"flow_id": flow_id, "org_id": org_id},
+            {"$set": {
+                "status": "draft", 
+                "unpublished_at": now, 
+                "updated_at": now
+            }},
+            return_document=ReturnDocument.AFTER
+        )
+        
+        if updated_flow:
+            logger.info(f"Unpublished automation flow: {flow_id}")
+            return serialize_mongo(updated_flow)
+        return None
+        
+    except Exception as e:
+        logger.error(f"Error unpublishing automation flow: {str(e)}")
+        raise
+
+
+async def _deactivate_flow_triggers(org_id: str, flow_id: str):
+    """Deactivate triggers for a flow"""
+    triggers_collection = _automation_triggers_collection()
+    
+    result = triggers_collection.update_many(
+        {"flow_id": flow_id, "org_id": org_id},
+        {"$set": {
+            "status": "inactive", 
+            "deactivated_at": datetime.now(timezone.utc)
+        }}
+    )
+    
+    logger.info(f"Deactivated {result.modified_count} triggers for flow {flow_id}")
+
+
+async def increment_execution_count(org_id: str, flow_id: str):
+    """Increment the execution count for a flow"""
+    try:
+        collection = _automation_flows_collection(org_id)
+        
+        collection.update_one(
+            {"flow_id": flow_id, "org_id": org_id},
+            {
+                "$inc": {"execution_count": 1},
+                "$set": {"last_executed_at": datetime.now(timezone.utc)}
+            }
+        )
+        
+        logger.info(f"Incremented execution count for flow {flow_id}")
+        
+    except Exception as e:
+        logger.error(f"Error incrementing execution count: {str(e)}")
+
 # REGISTER FLOW TRIGGERS
 async def _register_flow_triggers(org_id: str, flow_id: str, flow_data: Dict):
     """Register triggers for a flow"""
