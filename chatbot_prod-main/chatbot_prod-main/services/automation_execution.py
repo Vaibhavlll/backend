@@ -182,21 +182,31 @@ async def execute_automation_flow(
         
         # Map event type to expected trigger type
         event_to_trigger_map = {
-            "post_comment": "instagram_comment",
-            "story_reply": "instagram_story_reply", 
-            "message_received": "instagram_dm_received",
-        }
+    "post_comment": "instagram_comment",
+    "story_reply": "instagram_story_reply", 
+    "message_received": "instagram_dm_received",
+}
 
         expected_trigger_type = event_to_trigger_map.get(context.trigger_type, context.trigger_type)
 
         # Find matching trigger
+        start_node_id = None
         for trigger_config in triggers:
             if trigger_config.get("type") == expected_trigger_type:
                 start_node_id = trigger_config.get("start_node_id")
+                logger.info(f"✅ Found matching trigger, starting at node: {start_node_id}")
                 break
-        
-        # Mark as successful
+
+        if not start_node_id:
+            raise Exception(f"No matching trigger found for type: {expected_trigger_type}")
+
+        # ✅ CRITICAL FIX: EXECUTE THE FLOW STARTING FROM TRIGGER'S START NODE
+        logger.info(f"🚀 Executing flow from start_node: {start_node_id}")
+        await _execute_node(context, start_node_id, nodes, connections)
+
+        # Mark as successful (AFTER execution completes)
         context.mark_success()
+        
         context.log(
             node_id="system",
             node_type="system",
