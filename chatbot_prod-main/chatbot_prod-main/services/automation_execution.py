@@ -183,9 +183,20 @@ async def execute_automation_flow(
         # Find the trigger node
         trigger_node_id = None
         for trigger_config in triggers:
-            trigger_node_id = trigger_config.get("start_node_id")
-            if trigger_node_id:
+            # Map frontend trigger types to backend
+            trigger_type = trigger_config.get("type")
+            
+            # Alias mapping
+            if trigger_type == "instagram_comment":
+                trigger_type = "instagram_post_comment"
+            elif trigger_type == "story_reply":
+                trigger_type = "instagram_story_reply"
+            
+            # Check if matches event
+            if trigger_type == context.trigger_type:
+                start_node_id = trigger_config.get("start_node_id")
                 break
+
         
         if not trigger_node_id:
             raise Exception("No trigger node found in flow")
