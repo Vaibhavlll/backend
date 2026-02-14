@@ -998,7 +998,7 @@ async def handle_webhook(request: Request, x_hub_signature_256: str = Header(Non
                             platform="instagram",
                             event_type="message_received",
                             trigger_data={
-                                "platform": "instagram",
+                                "platform": "instagram",    
                                 "platform_id": recipient_id,
                                 "conversation_id": conversation_id,
                                 "customer_id": sender_id,
@@ -1009,7 +1009,7 @@ async def handle_webhook(request: Request, x_hub_signature_256: str = Header(Non
                                 "message_id": ig_message_id
                             }
                         )
-                        
+
                     # Check if conversation exists
                     existing_conversation = conversations_collection.find_one({"conversation_id": conversation_id})
                     conversation = conversations_collection.find_one({"conversation_id": conversation_id})
