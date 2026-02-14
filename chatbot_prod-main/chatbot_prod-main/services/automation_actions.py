@@ -11,24 +11,22 @@ logger = get_logger(__name__)
 db = get_mongo_db()
 
 
+# automation_actions.py - Line ~40
+
 async def execute_action_node(context, node_id: str, node_type: str, config: Dict):
-    """
-    Execute an action node based on its type
-    
-    Args:
-        context: FlowExecutionContext
-        node_id: ID of the node being executed
-        node_type: Type of action (e.g., 'instagram_message', 'whatsapp_message')
-        config: Node configuration
-    """
+    """Execute an action node based on its type"""
     try:
-        # Extract common data from trigger
         trigger_data = context.trigger_data
         platform = trigger_data.get("platform")
-        conversation_id = trigger_data.get("conversation_id")
-        customer_id = trigger_data.get("customer_id")
         
-        # Execute based on node type
+        # CRITICAL FIX: Check config.action_type for action nodes
+        action_type = config.get("action_type")
+        
+        # If node_type is generic "action", use action_type from config
+        if node_type == "action" and action_type:
+            node_type = action_type
+        
+        # Now check the actual action type
         if node_type == "instagram_message":
             await execute_instagram_message(context, node_id, config, trigger_data)
             
@@ -41,20 +39,20 @@ async def execute_action_node(context, node_id: str, node_type: str, config: Dic
         elif node_type == "remove_tag":
             await execute_remove_tag(context, node_id, config, trigger_data)
             
-        elif node_type == "set_custom_field":
+        elif node_type == "set_custom_field" or node_type == "set_field":
             await execute_set_custom_field(context, node_id, config, trigger_data)
             
-        elif node_type == "http_request":
+        elif node_type == "http_request" or node_type == "api":
             await execute_http_request(context, node_id, config, trigger_data)
         
-        # NEW ACTION TYPES FOR INSTAGRAM COMMENTS
+        # Instagram-specific actions
         elif node_type == "reply_to_comment":
             await execute_reply_to_comment(context, node_id, config, trigger_data)
             
         elif node_type == "send_dm":
             await execute_send_dm(context, node_id, config, trigger_data)
         
-        elif node_type == "delay":
+        elif node_type == "delay" or node_type == "smart_delay":
             await _execute_delay_node(context, node_id, config)
             
         else:
@@ -63,7 +61,6 @@ async def execute_action_node(context, node_id: str, node_type: str, config: Dic
     except Exception as e:
         context.log(node_id, node_type, "error", f"Error executing action: {str(e)}", success=False)
         logger.error(f"Error executing action node {node_id}: {str(e)}", exc_info=True)
-
 
 # ADD THESE NEW FUNCTIONS AT THE END OF THE FILE (after line 230)
 
