@@ -316,39 +316,43 @@ async def increment_execution_count(org_id: str, flow_id: str):
         logger.error(f"Error incrementing execution count: {str(e)}")
 
 # REGISTER FLOW TRIGGERS
+# automation_service.py - Line ~270
+
 async def _register_flow_triggers(org_id: str, flow_id: str, flow_data: Dict):
     """Register triggers for a flow"""
     triggers_collection = _automation_triggers_collection()
     
-    nodes = flow_data.get("nodes", {})
     triggers = flow_data.get("triggers", [])
     
-    for trigger_config in triggers:
+    # CRITICAL FIX: Process triggers directly, don't look them up in nodes
+    for idx, trigger_config in enumerate(triggers):
+        trigger_type = trigger_config.get("type")  # ✅ Get from trigger directly
+        config = trigger_config.get("config", {})
         start_node_id = trigger_config.get("start_node_id")
-        if not start_node_id or start_node_id not in nodes:
+        
+        if not start_node_id:
+            logger.warning(f"Trigger {idx} has no start_node_id, skipping")
             continue
         
-        node = nodes[start_node_id]
-        node_type = node.get("type")
-        node_config = node.get("config", {})
+        # Determine platform from trigger type
+        platform = "instagram" if "instagram" in trigger_type else "whatsapp"
         
-        platform = node.get("app")
-        trigger_type = node_type
-        
+        # Extract filters from config
         filters = {
-            "keyword": node_config.get("keyword", ""),
-            "post_id": node_config.get("post_id"),
-            "story_id": node_config.get("story_id"),
-            "tag": node_config.get("tag")
+            "keyword": config.get("keyword", ""),
+            "post_id": config.get("post_id"),
+            "story_id": config.get("story_id"),
+            "tag": config.get("tag")
         }
         
         trigger_doc = {
-            "trigger_id": f"trigger_{flow_id}_{start_node_id}",
+            "trigger_id": f"trigger_{flow_id}_{idx}",
             "flow_id": flow_id,
             "org_id": org_id,
             "platform": platform,
             "trigger_type": trigger_type,
             "filters": filters,
+            "start_node_id": start_node_id,  # Store for execution
             "status": "active",
             "registered_at": datetime.now(timezone.utc),
             "last_triggered_at": None
@@ -360,9 +364,9 @@ async def _register_flow_triggers(org_id: str, flow_id: str, flow_data: Dict):
             upsert=True
         )
         
-        logger.info(f"Registered trigger {trigger_doc['trigger_id']}")
+        logger.info(f"Registered trigger: {trigger_type} for flow {flow_id}")
 
-
+        
 #  FLOW VALIDATION
 def validate_flow_structure(flow_data: Dict) -> tuple:
     """
