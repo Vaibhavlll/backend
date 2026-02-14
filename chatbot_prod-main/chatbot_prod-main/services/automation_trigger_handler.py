@@ -121,8 +121,7 @@ def _event_to_trigger_type(event_type: str, platform: str) -> str:
         "message_received": f"{platform}_message_received" if platform == "whatsapp" else "instagram_dm_received",
         "story_mention": "instagram_story_mention",
         "story_reply": "instagram_story_reply",
-        "post_comment": "instagram_post_comment",
-        "post_comment": "instagram_post_comment",
+        "post_comment": "instagram_comment",
         "tag_added": "contact_tag_added",
         "tag_removed": "contact_tag_removed"
     }
@@ -238,3 +237,32 @@ async def trigger_tag_automation(org_id: str, conversation_id: str, tag: str, ac
         
     except Exception as e:
         logger.error(f"Error triggering tag automation: {str(e)}")
+
+
+def _check_keyword_match(trigger_config: Dict, trigger_data: Dict) -> bool:
+    """
+    Check if message contains any of the trigger keywords
+    
+    Supports pipe-separated keywords: "price|info|help"
+    """
+    keyword_filter = trigger_config.get("keyword", "")
+    
+    if not keyword_filter:
+        return True  # No keyword filter = always match
+    
+    message_text = trigger_data.get("message_text", "").lower()
+    
+    # Split by pipe and check if ANY keyword matches
+    keywords = [k.strip().lower() for k in keyword_filter.split("|") if k.strip()]
+    
+    if not keywords:
+        return True
+    
+    # Check if ANY keyword is in the message
+    for keyword in keywords:
+        if keyword in message_text:
+            logger.success(f"✅ Keyword matched: '{keyword}' found in '{message_text}'")
+            return True
+    
+    logger.debug(f"❌ No keyword match. Looking for: {keywords}, Got: '{message_text}'")
+    return False
