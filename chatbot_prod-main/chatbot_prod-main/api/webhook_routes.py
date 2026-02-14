@@ -568,8 +568,7 @@ async def handle_webhook(request: Request, x_hub_signature_256: str = Header(Non
                     value = changes.get('value')
 
                     if field == 'comments':
-                        await process_comments_events(value, ig_account_id)
-                    return {"status": "success"}
+                        await process_comments_events(value, ig_account_id, background_tasks)
                 
                 for message in entry.get("messaging", []):
                     # Check if this is a deletion event
@@ -1081,20 +1080,9 @@ async def handle_webhook(request: Request, x_hub_signature_256: str = Header(Non
 
     return {"status": "ok"}
 
-async def process_comments_events(value: dict, ig_account_id: str):
+async def process_comments_events(value: dict, ig_account_id: str, background_tasks: BackgroundTasks):
     """
     Process Instagram comment events from webhook
-    
-    Webhook payload structure:
-    {
-        "field": "comments",
-        "value": {
-            "from": {"id": "user_id", "username": "john_doe"},
-            "media": {"id": "media_post_id", "media_product_type": "FEED"},
-            "id": "comment_id_123",
-            "text": "Interested! What's the price?"
-        }
-    }
     """
     try:
         comment_id = value.get("id")
@@ -1104,9 +1092,17 @@ async def process_comments_events(value: dict, ig_account_id: str):
         commenter_info = value.get("from", {})
         commenter_id = commenter_info.get("id")
         commenter_username = commenter_info.get("username")
+
+        if str(commenter_id) == str(ig_account_id):
+            logger.info("Ignoring echo comment (comment made by the business account).")
+            return
         
         if not comment_id or not post_id:
             logger.warning("Missing comment_id or post_id in webhook payload")
+            return
+        
+        if comment_id in services.processed_message_ids:
+            logger.info(f"Duplicate comment ID {comment_id}, skipping processing.")
             return
         
         logger.info(f"📝 Instagram Comment Received: @{commenter_username} on post {post_id}: '{comment_text}'")
@@ -1124,38 +1120,39 @@ async def process_comments_events(value: dict, ig_account_id: str):
             logger.error(f"No org_id found for Instagram ID: {ig_account_id}")
             return
         
-        # Prepare trigger data for automation system
+        # ✅ CRITICAL: Prepare trigger data
         trigger_data = {
             "platform": "instagram",
-            "platform_id": ig_account_id,  # Instagram business account ID
+            "platform_id": ig_account_id,
             "comment_id": comment_id,
-            "post_id": post_id,
+            "post_id": post_id,  # ✅ Must match trigger filter
             "commenter_id": commenter_id,
             "commenter_username": commenter_username,
-            "customer_id": commenter_id,  # For action execution
+            "customer_id": commenter_id,
             "customer_name": commenter_username,
             "customer_username": commenter_username,
-            "message_text": comment_text,  # For keyword matching
+            "message_text": comment_text,  # ✅ For keyword matching
             "comment_text": comment_text,
             "media_type": media_info.get("media_product_type"),
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
         
-        # Trigger automation system
+        # ✅ CRITICAL: Trigger automation system with correct event_type
         from services.automation_trigger_handler import check_and_trigger_automations
         
-        await check_and_trigger_automations(
-            org_id=org_id,
-            platform="instagram",
-            event_type="post_comment",  # Maps to "instagram_post_comment"
-            trigger_data=trigger_data
-        )
-        
+        background_tasks.add_task(
+                check_and_trigger_automations,
+                org_id=org_id,
+                platform="instagram",
+                event_type="post_comment",
+                trigger_data=trigger_data
+            )     
         logger.success(f"✅ Processed Instagram comment automation for comment {comment_id}")
         
     except Exception as e:
         logger.error(f"Error processing Instagram comment event: {str(e)}", exc_info=True)
 
+        
 
 @router.post("/cashfree")
 async def cashfree_webhook(request: Request):
