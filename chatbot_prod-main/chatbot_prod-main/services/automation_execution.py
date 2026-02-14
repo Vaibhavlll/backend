@@ -180,29 +180,20 @@ async def execute_automation_flow(
         connections = flow_data.get("connections", [])
         triggers = flow_data.get("triggers", [])
         
-        # Find the trigger node
-        trigger_node_id = None
+        # Map event type to expected trigger type
+        event_to_trigger_map = {
+            "post_comment": "instagram_comment",
+            "story_reply": "instagram_story_reply", 
+            "message_received": "instagram_dm_received",
+        }
+
+        expected_trigger_type = event_to_trigger_map.get(context.trigger_type, context.trigger_type)
+
+        # Find matching trigger
         for trigger_config in triggers:
-            # Map frontend trigger types to backend
-            trigger_type = trigger_config.get("type")
-            
-            # Alias mapping
-            if trigger_type == "instagram_comment":
-                trigger_type = "instagram_post_comment"
-            elif trigger_type == "story_reply":
-                trigger_type = "instagram_story_reply"
-            
-            # Check if matches event
-            if trigger_type == context.trigger_type:
+            if trigger_config.get("type") == expected_trigger_type:
                 start_node_id = trigger_config.get("start_node_id")
                 break
-
-        
-        if not trigger_node_id:
-            raise Exception("No trigger node found in flow")
-        
-        # Execute the flow starting from trigger node
-        await _execute_node(context, trigger_node_id, nodes, connections)
         
         # Mark as successful
         context.mark_success()
@@ -274,7 +265,7 @@ async def _execute_node(
     
     try:
         # Handle TRIGGER nodes - just log and continue
-        if node_type in ["instagram_dm_received", "instagram_post_comment", 
+        if node_type in ["instagram_dm_received", "instagram_comment", 
                         "instagram_story_reply", "instagram_story_mention",
                         "whatsapp_message_received", "contact_tag_added", 
                         "contact_tag_removed"]:
