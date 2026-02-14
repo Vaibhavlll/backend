@@ -556,7 +556,7 @@ async def handle_webhook(request: Request, x_hub_signature_256: str = Header(Non
 
                             return {"status": "ok"}
     
-    if payload["object"] == "instagram": 
+    if payload["object"] == "instagram":
         if "entry" in payload and len(payload["entry"]) > 0:
             for entry in payload["entry"]:
                 ig_account_id = entry.get("id")
@@ -1081,6 +1081,82 @@ async def handle_webhook(request: Request, x_hub_signature_256: str = Header(Non
 
     return {"status": "ok"}
 
+async def process_comments_events(value: dict, ig_account_id: str):
+    """
+    Process Instagram comment events from webhook
+    
+    Webhook payload structure:
+    {
+        "field": "comments",
+        "value": {
+            "from": {"id": "user_id", "username": "john_doe"},
+            "media": {"id": "media_post_id", "media_product_type": "FEED"},
+            "id": "comment_id_123",
+            "text": "Interested! What's the price?"
+        }
+    }
+    """
+    try:
+        comment_id = value.get("id")
+        comment_text = value.get("text", "")
+        media_info = value.get("media", {})
+        post_id = media_info.get("id")
+        commenter_info = value.get("from", {})
+        commenter_id = commenter_info.get("id")
+        commenter_username = commenter_info.get("username")
+        
+        if not comment_id or not post_id:
+            logger.warning("Missing comment_id or post_id in webhook payload")
+            return
+        
+        logger.info(f"📝 Instagram Comment Received: @{commenter_username} on post {post_id}: '{comment_text}'")
+        
+        # Find organization for this Instagram account
+        org_collection = db.organizations.find_one({"ig_id": ig_account_id})
+        
+        if not org_collection:
+            logger.error(f"No organization found for Instagram ID: {ig_account_id}")
+            return
+        
+        org_id = org_collection.get("org_id")
+        
+        if not org_id:
+            logger.error(f"No org_id found for Instagram ID: {ig_account_id}")
+            return
+        
+        # Prepare trigger data for automation system
+        trigger_data = {
+            "platform": "instagram",
+            "platform_id": ig_account_id,  # Instagram business account ID
+            "comment_id": comment_id,
+            "post_id": post_id,
+            "commenter_id": commenter_id,
+            "commenter_username": commenter_username,
+            "customer_id": commenter_id,  # For action execution
+            "customer_name": commenter_username,
+            "customer_username": commenter_username,
+            "message_text": comment_text,  # For keyword matching
+            "comment_text": comment_text,
+            "media_type": media_info.get("media_product_type"),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        
+        # Trigger automation system
+        from services.automation_trigger_handler import check_and_trigger_automations
+        
+        await check_and_trigger_automations(
+            org_id=org_id,
+            platform="instagram",
+            event_type="post_comment",  # Maps to "instagram_post_comment"
+            trigger_data=trigger_data
+        )
+        
+        logger.success(f"✅ Processed Instagram comment automation for comment {comment_id}")
+        
+    except Exception as e:
+        logger.error(f"Error processing Instagram comment event: {str(e)}", exc_info=True)
+
+
 @router.post("/cashfree")
 async def cashfree_webhook(request: Request):
 
@@ -1124,3 +1200,5 @@ async def cashfree_webhook(request: Request):
         logger.error(f"Webhook processing failed : {e}")
 
     return {"status": "processed"}
+
+
