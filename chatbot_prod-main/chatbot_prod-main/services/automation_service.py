@@ -336,14 +336,19 @@ async def _register_flow_triggers(org_id: str, flow_id: str, flow_data: Dict):
         
         # Determine platform from trigger type
         platform = "instagram" if "instagram" in trigger_type else "whatsapp"
+
+        # Handle both array and string keywords
+        keyword_value = config.get("keyword", "")
+        if isinstance(keyword_value, list):
+            keyword_value = "|".join(keyword_value)
         
         # Extract filters from config
         filters = {
-            "keyword": config.get("keyword", ""),
-            "post_id": config.get("post_id"),
-            "story_id": config.get("story_id"),
-            "tag": config.get("tag")
-        }
+        "keyword": keyword_value,
+        "post_id": config.get("post_id"),
+        "story_id": config.get("story_id"),
+        "tag": config.get("tag")
+}
         
         trigger_doc = {
             "trigger_id": f"trigger_{flow_id}_{idx}",
@@ -366,7 +371,7 @@ async def _register_flow_triggers(org_id: str, flow_id: str, flow_data: Dict):
         
         logger.info(f"Registered trigger: {trigger_type} for flow {flow_id}")
 
-        
+
 #  FLOW VALIDATION
 def validate_flow_structure(flow_data: Dict) -> tuple:
     """
