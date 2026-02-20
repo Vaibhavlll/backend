@@ -36,7 +36,25 @@ class FlowExecutionContext:
         self.flow_id = flow_id
         self.trigger_type = trigger_type
         self.trigger_data = trigger_data
-        self.variables = {"trigger_data": trigger_data}
+        self.variables = {
+            # Keep full nested structure for advanced users
+            "trigger_data": trigger_data,
+            
+            # Flatten common fields for convenience (extract from trigger_data)
+            "customer_name": trigger_data.get("customer_name") or trigger_data.get("commenter_username"),
+            "customer_username": trigger_data.get("customer_username") or trigger_data.get("commenter_username"),
+            "customer_id": trigger_data.get("customer_id") or trigger_data.get("commenter_id"),
+            "comment_text": trigger_data.get("comment_text") or trigger_data.get("message_text"),
+            "comment_id": trigger_data.get("comment_id"),
+            "post_id": trigger_data.get("post_id"),
+            "platform": trigger_data.get("platform"),
+            "platform_id": trigger_data.get("platform_id"),
+            
+            # Dynamic variables that can be set during execution
+            "execution_id": self.execution_id,
+            "org_id": org_id,
+            "flow_id": flow_id,
+        }
         self.logs = []
         self.status = "running"
         self.error = None
