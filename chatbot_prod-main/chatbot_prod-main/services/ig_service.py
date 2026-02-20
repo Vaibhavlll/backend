@@ -10,6 +10,7 @@ from services.websocket_service import broadcast_main_ws
 from supabase import create_client, Client
 from pymongo import UpdateOne, ReturnDocument
 from fastapi import HTTPException
+from fastapi import BackgroundTasks
 
 # Internal modules
 from core.managers import manager
@@ -730,13 +731,13 @@ async def reply_to_comment(comment_id: str, reply_text: str, ig_account_id: str)
         # Instagram Graph API v22.0 - Reply to comment
         url = f"https://graph.instagram.com/v22.0/{comment_id}/replies"
         
-        payload = {
+        params = {
             "message": reply_text,
             "access_token": page_access_token
         }
         
         async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(url, data=payload)
+            response = await client.post(url, params=params)
             
             if response.status_code == 200:
                 result = response.json()
@@ -1484,3 +1485,88 @@ async def get_comment_details(comment_id: str, ig_account_id: str) -> dict:
     except Exception as e:
         logger.error(f"Error fetching comment details: {str(e)}")
         return {}
+
+
+
+async def process_comments_events(value: dict, ig_account_id: str, background_tasks: BackgroundTasks):
+    """
+    Process Instagram comment events from webhook
+    """
+    try:
+        comment_id = value.get("id")
+        comment_text = value.get("text", "")
+        media_info = value.get("media", {})
+        post_id = media_info.get("id")
+        commenter_info = value.get("from", {})
+        commenter_id = commenter_info.get("id")
+        commenter_username = commenter_info.get("username")
+
+        if str(commenter_id) == str(ig_account_id):
+            logger.info("Ignoring echo comment (comment made by the business account).")
+            return
+        
+        if not comment_id or not post_id:
+            logger.warning("Missing comment_id or post_id in webhook payload")
+            return
+        
+        if comment_id in services.processed_message_ids:
+            logger.info(f"Duplicate comment ID {comment_id}, skipping processing.")
+            return
+        
+        logger.info(f" Instagram Comment Received: @{commenter_username} on post {post_id}: '{comment_text}'")
+        
+        #  Get connection from instagram_connections 
+        instagram_connection = db.instagram_connections.find_one(
+            {"instagram_id": ig_account_id, "is_active": True},
+            sort=[("last_updated", -1)]
+        )
+        
+        if not instagram_connection:
+            logger.error(f"No active Instagram connection found for {ig_account_id}")
+            return
+        
+        #  Get org_id and page_access_token from connection
+        org_id = instagram_connection.get("org_id")
+        page_access_token = instagram_connection.get("page_access_token")
+        
+        if not org_id:
+            logger.error(f"No org_id found for Instagram connection {ig_account_id}")
+            return
+        
+        if not page_access_token:
+            logger.warning(f"No page_access_token found for Instagram connection {ig_account_id}")
+            # Continue anyway - automation might not need to reply
+        
+        # Prepare trigger data with ALL required fields
+        trigger_data = {
+            "platform": "instagram",
+            "platform_id": ig_account_id,  
+            "comment_id": comment_id,
+            "post_id": post_id,  
+            "commenter_id": commenter_id,
+            "commenter_username": commenter_username,
+            "customer_id": commenter_id,
+            "customer_name": commenter_username,
+            "customer_username": commenter_username,
+            "message_text": comment_text,  
+            "comment_text": comment_text,
+            "media_type": media_info.get("media_product_type"),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        
+        # Trigger automation system with correct event_type
+        from services.automation_trigger_handler import check_and_trigger_automations
+        
+        background_tasks.add_task(
+            check_and_trigger_automations,
+            org_id=org_id,
+            platform="instagram",
+            event_type="post_comment",  # Maps to "instagram_comment" trigger
+            trigger_data=trigger_data
+        )
+        
+        logger.success(f" Processed Instagram comment automation for comment {comment_id}")
+        
+    except Exception as e:
+        logger.error(f"Error processing Instagram comment event: {str(e)}", exc_info=True)
+
