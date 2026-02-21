@@ -1,5 +1,5 @@
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel, Field
 
 # Internal Modules
@@ -15,12 +15,17 @@ from services.automation_service import (
     unpublish_automation_flow,
     validate_flow_structure
 )
+from services.automation_scheduler import (
+    list_followups_for_flow,
+    list_followups_for_org,
+    cancel_followup,
+)
 from core.logger import get_logger
 
 logger = get_logger(__name__)
 db = get_mongo_db()
 
-router = APIRouter(prefix="/api/automation_flows", tags=["Automation Flows"])
+router = APIRouter(prefix="/api/automation_flows", tags=["Automation Flows – Follow-ups"])
 
 
 # Request/Response Models
@@ -406,6 +411,139 @@ async def get_available_actions(user: CurrentUser):
     ]
     
     return {"actions": actions}
+
+@router.get("/{flow_id}/followups")
+async def get_flow_followups(
+    flow_id: str,
+    user: CurrentUser,
+    status: Optional[str] = Query(None, description="Filter by status: pending|executing|completed|failed|cancelled"),
+    limit: int = Query(50, ge=1, le=200),
+):
+    """
+    List all scheduled WhatsApp follow-ups for a specific flow.
+    Useful for the flow detail page to show pending / past follow-ups.
+    """
+    try:
+        org_id = user.org_id
+        if not org_id:
+            raise HTTPException(status_code=400, detail="Organization ID not found")
+
+        followups = await list_followups_for_flow(
+            org_id=org_id,
+            flow_id=flow_id,
+            status=status,
+            limit=limit,
+        )
+        return {"followups": followups, "count": len(followups)}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching follow-ups for flow {flow_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/{flow_id}/followups/{schedule_id}")
+async def cancel_flow_followup(
+    flow_id: str,
+    schedule_id: str,
+    user: CurrentUser,
+):
+    """
+    Cancel a specific pending follow-up by its schedule_id.
+    Only ``pending`` follow-ups can be cancelled; executing/completed ones cannot.
+    """
+    try:
+        org_id = user.org_id
+        if not org_id:
+            raise HTTPException(status_code=400, detail="Organization ID not found")
+
+        success = await cancel_followup(schedule_id=schedule_id, org_id=org_id)
+
+        if not success:
+            raise HTTPException(
+                status_code=404,
+                detail="Follow-up not found or is not in a cancellable state"
+            )
+
+        return {"message": "Follow-up cancelled successfully", "schedule_id": schedule_id}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error cancelling follow-up {schedule_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/followups/pending")
+async def get_pending_followups(
+    user: CurrentUser,
+    limit: int = Query(100, ge=1, le=500),
+):
+    """
+    List all pending + executing follow-ups for the organisation.
+    Designed for an admin dashboard that shows what's queued.
+    """
+    try:
+        org_id = user.org_id
+        if not org_id:
+            raise HTTPException(status_code=400, detail="Organization ID not found")
+
+        # Fetch pending and executing separately then merge
+        pending   = await list_followups_for_org(org_id=org_id, status="pending", limit=limit)
+        executing = await list_followups_for_org(org_id=org_id, status="executing", limit=20)
+
+        all_followups = executing + pending  # executing first (they're running now)
+        return {
+            "followups": all_followups,
+            "count": len(all_followups),
+            "breakdown": {
+                "executing": len(executing),
+                "pending"  : len(pending),
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching pending follow-ups for org: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{flow_id}/followups/stats")
+async def get_followup_stats(flow_id: str, user: CurrentUser):
+    """
+    Return counts of follow-ups grouped by status for a specific flow.
+    Useful for displaying a summary badge on the flow card.
+    """
+    try:
+        org_id = user.org_id
+        if not org_id:
+            raise HTTPException(status_code=400, detail="Organization ID not found")
+
+        from database import get_mongo_db
+        db = get_mongo_db()
+
+        pipeline = [
+            {"$match": {"org_id": org_id, "flow_id": flow_id}},
+            {"$group": {"_id": "$status", "count": {"$sum": 1}}},
+        ]
+        result = list(db["automation_scheduled_followups"].aggregate(pipeline))
+
+        stats = {row["_id"]: row["count"] for row in result}
+        total = sum(stats.values())
+
+        return {
+            "flow_id": flow_id,
+            "stats"  : stats,
+            "total"  : total,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching follow-up stats for flow {flow_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 
