@@ -297,7 +297,7 @@ async def get_available_triggers(user: CurrentUser):
     """Get list of available trigger types"""
     triggers = [
         {
-            "type": "instagram_post_comment",
+            "type": "instagram_comment",
             "name": "Instagram Post Comment",
             "description": "Triggers when someone comments on your Instagram post",
             "platform": "instagram",
